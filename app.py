@@ -65,6 +65,10 @@ if "initialized" not in st.session_state:
     st.session_state.initialized = False
 if "qa_history" not in st.session_state:
     st.session_state.qa_history = []
+if "logp_thr" not in st.session_state:
+    st.session_state.logp_thr = -11.5
+if "max_retry" not in st.session_state:
+    st.session_state.max_retry = 3
 
 # ── 사이드바 ──────────────────────────────────────────────────
 with st.sidebar:
@@ -90,9 +94,11 @@ with st.sidebar:
     with col1: epochs  = st.select_slider("학습", [5,10,15,20], value=10)
     with col2: som_grid= st.select_slider("SOM", [4,5,6,7], value=6)
 
-    logp_thr   = st.slider("가드레일 임계값", -15.0, -5.0, -11.5, 0.5)
+    logp_thr   = st.slider("가드레일 임계값", -15.0, -5.0, st.session_state.logp_thr, 0.5)
     ev_thr     = st.slider("진화 임계값", -16.0, -8.0, -13.0, 0.5)
-    max_retry  = st.slider("최대 재생성", 1, 5, 3)
+    max_retry  = st.slider("최대 재생성", 1, 5, st.session_state.max_retry)
+    st.session_state.logp_thr  = logp_thr
+    st.session_state.max_retry = max_retry
 
     if corpus_file and st.button("🚀 초기화", use_container_width=True):
         with st.spinner("GasCore 초기화 중..."):
@@ -118,9 +124,14 @@ with st.sidebar:
                     text, epochs=epochs,
                     som_grid=som_grid, on_progress=cb
                 )
+                # guideline_hint 세션 저장
+                st.session_state.fw.guideline_hint = text[:1000]
                 st.session_state.initialized = True
                 st.session_state.qa_history = []
-                st.success("✓ GasCore 초기화 완료")
+                # 학습 확인
+                nm_ok = st.session_state.fw.nm and st.session_state.fw.nm.is_trained
+                nm_total = st.session_state.fw.nm.total if nm_ok else 0
+                st.success(f"✓ GasCore 초기화 완료 | NM {'✅' if nm_ok else '❌'} ({nm_total}토큰)")
             except Exception as e:
                 st.error(f"실패: {e}")
 
@@ -335,8 +346,8 @@ with tab2:
             result = fw.run_guardrail(
                 question=question,
                 llm_fn=llm_fn,
-                max_attempts=max_retry,
-                logp_thr=logp_thr,
+                max_attempts=st.session_state.max_retry,
+                logp_thr=st.session_state.logp_thr,
             )
 
         st.session_state.qa_history.insert(0, {
@@ -399,7 +410,7 @@ with tab3:
     )
     if st.button("🔍 XAI 분석", use_container_width=True):
         if xai_text.strip():
-            xai = fw.explain(xai_text, logp_thr=logp_thr)
+            xai = fw.explain(xai_text, logp_thr=st.session_state.logp_thr)
             if xai:
                 v = xai.verdict
                 v_cls = {"PASS":"pass","WARNING":"warn","FATAL":"fatal"}.get(v,"")
