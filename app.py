@@ -75,6 +75,10 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 📚 코퍼스")
     corpus_file = st.file_uploader("코퍼스 업로드", type=["txt","pdf","docx"])
+    if corpus_file:
+        st.session_state["corpus_bytes"] = corpus_file.read()
+        st.session_state["corpus_name"]  = corpus_file.name
+        corpus_file.seek(0)
 
     c1,c2 = st.columns(2)
     with c1: epochs   = st.select_slider("학습", [5,10,15,20], value=10)
@@ -87,20 +91,26 @@ with st.sidebar:
     st.session_state.max_retry = st.slider(
         "최대 재생성", 1, 5, st.session_state.max_retry)
 
-    if corpus_file and st.button("🚀 초기화", use_container_width=True):
+    has_corpus = "corpus_bytes" in st.session_state
+    if has_corpus:
+        st.caption(f"📄 {st.session_state.get('corpus_name','')}")
+
+    if st.button("🚀 초기화", use_container_width=True,
+                 disabled=not has_corpus):
         with st.spinner("초기화 중..."):
             try:
-                name = corpus_file.name.lower()
+                raw   = st.session_state["corpus_bytes"]
+                name  = st.session_state.get("corpus_name","").lower()
                 if name.endswith(".pdf"):
                     import pypdf
-                    reader = pypdf.PdfReader(io.BytesIO(corpus_file.read()))
+                    reader = pypdf.PdfReader(io.BytesIO(raw))
                     text = "\n".join(p.extract_text() or "" for p in reader.pages)
                 elif name.endswith(".docx"):
                     import docx
-                    doc = docx.Document(io.BytesIO(corpus_file.read()))
+                    doc = docx.Document(io.BytesIO(raw))
                     text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
                 else:
-                    text = corpus_file.read().decode("utf-8", errors="ignore")
+                    text = raw.decode("utf-8", errors="ignore")
 
                 prog = st.progress(0)
                 def cb(pct, msg): prog.progress(pct)
