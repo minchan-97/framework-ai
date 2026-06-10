@@ -124,6 +124,7 @@ with st.sidebar:
 
                 nm_ok = fw.nm and fw.nm.is_trained
                 st.success(f"✓ 완료 | NM {'✅' if nm_ok else '❌'} ({fw.nm.total if nm_ok else 0}토큰)")
+                st.rerun()
             except Exception as e:
                 st.error(f"실패: {e}")
                 import traceback; traceback.print_exc()
@@ -131,15 +132,33 @@ with st.sidebar:
     # pkl 로드
     st.markdown("---")
     pkl_file = st.file_uploader("저장된 프레임워크 (.pkl)", type=["pkl"])
-    if pkl_file and not st.session_state.initialized:
-        try:
-            fw = GasCoreFramework.from_dict(pickle.loads(pkl_file.read()))
-            st.session_state.fw = fw
-            st.session_state.initialized = True
-            st.success(f"✓ 로드 완료 ({fw.cycle}순환)")
-            st.rerun()
-        except Exception as e:
-            st.error(f"로드 실패: {e}")
+    if pkl_file:
+        st.session_state["pkl_bytes"] = pkl_file.read()
+
+    if "pkl_bytes" in st.session_state and not st.session_state.initialized:
+        if st.button("📂 인덱스 불러오기", use_container_width=True):
+            try:
+                with st.spinner("로드 중..."):
+                    fw = GasCoreFramework.from_dict(
+                        pickle.loads(st.session_state["pkl_bytes"])
+                    )
+                    st.session_state.fw = fw
+                    st.session_state.initialized = True
+                    st.session_state.qa_history = []
+                    # 디버그 정보
+                    ev = fw.evolving
+                    empty_n = len(ev.som.get_empty()) if ev and ev.som else 0
+                    filled_n = len(ev.som.neuron_sentences) if ev and ev.som else 0
+                    nm_n = fw.nm.total if fw.nm and fw.nm.is_trained else 0
+                st.success(
+                    f"✓ 로드 완료 ({fw.cycle}순환) | "
+                    f"NM:{nm_n}토큰 | "
+                    f"SOM 빈:{empty_n} 채워짐:{filled_n}"
+                )
+                st.rerun()
+            except Exception as e:
+                st.error(f"로드 실패: {e}")
+                import traceback; st.code(traceback.format_exc())
 
     # 상태
     if st.session_state.initialized:
@@ -194,6 +213,9 @@ with tab1:
             with st.spinner("SOM 분석 + 생성 중..."):
                 t0 = time.perf_counter()
                 try:
+                    # pending 초기화 (중복 방지)
+                    if fw.evolving:
+                        fw.evolving.pending = []
                     cands = fw.generate_candidates(
                         max_candidates=max_cands,
                         logp_thr=st.session_state.ev_thr,
@@ -202,15 +224,19 @@ with tab1:
                     )
                     ms = (time.perf_counter()-t0)*1000
                     llm_n = sum(1 for c in cands if c.get("by_llm"))
-                    st.success(f"✓ {len(cands)}개 ({ms:.0f}ms)"
-                               f"{' 🤖'+str(llm_n) if llm_n else ''}")
-                    if not cands:
+                    if cands:
+                        st.success(f"✓ {len(cands)}개 ({ms:.0f}ms)"
+                                   f"{' 🤖'+str(llm_n) if llm_n else ''}")
+                    else:
                         ev = fw.evolving
+                        empty_n = len(ev.som.get_empty()) if ev and ev.som else 0
+                        filled_n = len(ev.som.neuron_sentences) if ev and ev.som else 0
                         st.warning(
-                            f"후보 없음\n"
-                            f"생성:{ev.stats['total_generated']} "
+                            f"후보 없음 ({ms:.0f}ms)\n"
+                            f"생성시도:{ev.stats['total_generated']} "
                             f"거부:{ev.stats['auto_rejected']}\n"
-                            f"빈자리:{len(ev.som.get_empty()) if ev.som else 0}"
+                            f"SOM 빈:{empty_n} / 채워짐:{filled_n}\n"
+                            f"vocab:{ev.V}"
                         )
                 except Exception as e:
                     st.error(f"오류: {e}")
