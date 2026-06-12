@@ -357,7 +357,7 @@ class NeuralMarkovEngine:
         return float((1.0 - np.mean(sims)) / 2.0)
 
     def evaluate(self, text: str, logp_thr: float = -8.0,
-                 mis_thr: float = 0.55) -> dict:
+                 mis_thr: float = 0.75) -> dict:
         import time
         t0 = time.perf_counter()
         pairs = tokenize_dual(text)
