@@ -222,6 +222,9 @@ class NeuralMarkovEngine:
         self.is_trained = False
         self.corpus_name = ""
         self.dim = 32
+        # 캘리브레이션
+        self.mu:  float = 0.0
+        self.std: float = 1.0
 
     def train(self, corpus_text: str, embedding_dim: int = 32,
               epochs: int = 20, on_epoch=None):
@@ -248,6 +251,25 @@ class NeuralMarkovEngine:
         )
         self.model.fit(ids, epochs=epochs, lr=0.05, seq_len=32, on_epoch=on_epoch)
         self.is_trained = True
+
+        # 캘리브레이션: 원본 문장들로 기준점 계산
+        self._calibrate(corpus_text)
+
+    def _calibrate(self, corpus_text: str):
+        """원본 문장들로 logP 기준점(mu, std) 계산"""
+        import numpy as _np
+        sents  = [s.strip() for s in corpus_text.split('\n')
+                  if s.strip() and len(s.strip()) > 8]
+        scores = []
+        for s in sents[:100]:
+            r = self.evaluate(s)
+            lp = r.get('avg_logp', -20.0)
+            if lp > -50:
+                scores.append(lp)
+        if scores:
+            self.mu  = float(_np.mean(scores))
+            # 최소 std = 2.0 (너무 좁으면 정상 문장도 탈락)
+            self.std = max(float(_np.std(scores)), 2.0)
 
     def _get_vec(self, word: str) -> Optional[np.ndarray]:
         if word in self.word2idx and self.model:
@@ -348,31 +370,43 @@ class NeuralMarkovEngine:
         for i, p in enumerate(per):
             p["raw_token"] = raw_tokens[i + 2] if i + 2 < len(raw_tokens) else p["token"]
 
-        mismatch = self._score_mismatch(tokens)
-        elapsed_ms = (time.perf_counter() - t0) * 1000
+        mismatch  = self._score_mismatch(tokens)
+        elapsed_ms= (time.perf_counter() - t0) * 1000
+
+        # z-score 기반 동적 임계값 (캘리브레이션 됐을 때)
+        z = (avg_logp - self.mu) / self.std if self.std > 1e-10 else 0.0
 
         mf = avg_logp < logp_thr; ef = mismatch > mis_thr
 
-        # 3구간 판정
-        # PASS:     logP > -10          → 도메인 안
-        # WARNING:  -10 ~ -12           → 경계 (도메인 안이지만 이상한 것 포함)
-        # FATAL:    logP < -14          → 도메인 완전 이탈
-        if avg_logp >= -10.0 and not ef:
-            status = "PASS"
-        elif avg_logp >= -14.0 and not ef:
-            status = "WARNING"
-        elif avg_logp < -14.0 or (mf and ef):
-            status = "FATAL"
-        elif not mf and ef:
-            status = "CRITICAL"
+        # 캘리브레이션 된 경우: z-score로 판정
+        if self.mu != 0.0 and abs(self.std - 1.0) > 1e-6:
+            # z < -2.0 → 코퍼스 기준에서 2 표준편차 이탈 → FATAL
+            if z < -2.5 or (z < -1.5 and ef):
+                status = "FATAL"
+            elif z < -1.0 or ef:
+                status = "WARNING"
+            else:
+                status = "PASS"
         else:
-            status = "WARNING"
+            # 캘리브레이션 없을 때 고정 임계값
+            if avg_logp >= -10.0 and not ef:
+                status = "PASS"
+            elif avg_logp >= -14.0 and not ef:
+                status = "WARNING"
+            elif avg_logp < -14.0 or (mf and ef):
+                status = "FATAL"
+            elif not mf and ef:
+                status = "CRITICAL"
+            else:
+                status = "WARNING"
 
         return {
-            "status": status,
-            "avg_logp": avg_logp,
-            "mismatch": mismatch,
-            "elapsed_ms": elapsed_ms,
-            "per_token": per,
-            "neural_active": self.is_trained,
+            "status":       status,
+            "avg_logp":     avg_logp,
+            "mismatch":     mismatch,
+            "elapsed_ms":   elapsed_ms,
+            "per_token":    per,
+            "neural_active":self.is_trained,
+            "z":            z,
+            "mu":           self.mu,
         }
