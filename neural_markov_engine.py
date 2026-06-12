@@ -371,35 +371,24 @@ class NeuralMarkovEngine:
         for i, p in enumerate(per):
             p["raw_token"] = raw_tokens[i + 2] if i + 2 < len(raw_tokens) else p["token"]
 
-        mismatch  = self._score_mismatch(tokens)
-        elapsed_ms= (time.perf_counter() - t0) * 1000
+        mismatch   = self._score_mismatch(tokens)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        mf = avg_logp < logp_thr
+        ef = mismatch > mis_thr
+        z  = (avg_logp - self.mu) / self.std if self.std > 1e-10 else 0.0
 
-        # z-score 기반 동적 임계값 (캘리브레이션 됐을 때)
-        z = (avg_logp - self.mu) / self.std if self.std > 1e-10 else 0.0
-
-        mf = avg_logp < logp_thr; ef = mismatch > mis_thr
-
-        # 캘리브레이션 된 경우: z-score로 판정
-        if self.mu != 0.0 and abs(self.std - 1.0) > 1e-6:
-            # z < -2.0 → 코퍼스 기준에서 2 표준편차 이탈 → FATAL
-            if z < -2.5 or (z < -1.5 and ef):
-                status = "FATAL"
-            elif z < -1.0 or ef:
-                status = "WARNING"
-            else:
-                status = "PASS"
+        # 고정 임계값 기반 판정 (쓰레기 코퍼스 내성)
+        # z-score는 참고용으로만 계산
+        if avg_logp >= -10.0 and not ef:
+            status = "PASS"
+        elif avg_logp >= -14.0 and not ef:
+            status = "WARNING"
+        elif avg_logp < -14.0 or (mf and ef):
+            status = "FATAL"
+        elif not mf and ef:
+            status = "CRITICAL"
         else:
-            # 캘리브레이션 없을 때 고정 임계값
-            if avg_logp >= -10.0 and not ef:
-                status = "PASS"
-            elif avg_logp >= -14.0 and not ef:
-                status = "WARNING"
-            elif avg_logp < -14.0 or (mf and ef):
-                status = "FATAL"
-            elif not mf and ef:
-                status = "CRITICAL"
-            else:
-                status = "WARNING"
+            status = "WARNING"
 
         return {
             "status":       status,
