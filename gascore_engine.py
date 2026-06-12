@@ -397,8 +397,7 @@ class GasCoreFramework:
         승인된 생성 문장들로 NeuralMarkov 재학습 → 다음 순환
         """
         if self.evolving and self.evolving.generated:
-            # 생성된 문장 추가 학습
-            new_sents = [g["sentence"] for g in self.evolving.generated]
+            new_sents  = [g["sentence"] for g in self.evolving.generated]
             new_corpus = "\n".join(new_sents)
             if self.nm and new_corpus.strip():
                 self.nm.train(new_corpus, embedding_dim=32, epochs=epochs)
@@ -406,6 +405,11 @@ class GasCoreFramework:
             for text in new_corpus_texts:
                 if self.nm:
                     self.nm.train(text, embedding_dim=32, epochs=epochs)
+
+        # 재학습 후 전체 코퍼스로 재캘리브레이션
+        if self.nm and self.corpus_text:
+            self.nm._calibrate(self.corpus_text)
+
         self._rebuild_layers()
         self.cycle += 1
 
@@ -457,6 +461,10 @@ class GasCoreFramework:
             fw.nm.mu    = nm.get("mu",  0.0)
             fw.nm.std   = nm.get("std", 1.0)
             fw.nm.is_trained = True
+
+            # 이전 버전 pkl (mu=0이면) 자동 캘리브레이션
+            if fw.nm.mu == 0.0 and fw.corpus_text:
+                fw.nm._calibrate(fw.corpus_text)
 
         # XAI + CoreAI 레이어 구성 (SOM 재학습 없음)
         fw._rebuild_layers()
