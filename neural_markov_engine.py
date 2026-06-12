@@ -230,13 +230,14 @@ class NeuralMarkovEngine:
               epochs: int = 20, on_epoch=None):
         self.dim = embedding_dim
         tokens = ko_tokenize(corpus_text)
-        self.total = len(tokens)
 
-        # 마르코프 학습
-        for i, t in enumerate(tokens):
+        # 마르코프 학습 — epochs만큼 반복 카운팅
+        tokens_ep = tokens * epochs
+        self.total = len(tokens_ep)
+        for i, t in enumerate(tokens_ep):
             self.uni[t] += 1
-            if i >= 1: self.bi[tokens[i-1]][t] += 1
-            if i >= 2: self.tri[(tokens[i-2], tokens[i-1])][t] += 1
+            if i >= 1: self.bi[tokens_ep[i-1]][t] += 1
+            if i >= 2: self.tri[(tokens_ep[i-2], tokens_ep[i-1])][t] += 1
 
         # 어휘 구축 (min_count=1)
         self.idx2word = list(self.uni.keys())
