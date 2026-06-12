@@ -38,14 +38,45 @@ _EOMI = ["했습니다","합니다","됩니다","있습니다","입니다",
 def tokenize(text: str) -> list:
     tokens = []
     for word in text.replace("\n"," ").split():
-        word = word.strip(".,!?()[]\"'：:；;~")
+        word = word.strip(".,!?()[]\"'~?：:；;")
         stem = word
         for s in sorted(_JOSA+_EOMI, key=len, reverse=True):
             if word.endswith(s) and len(word)>len(s)+1:
                 stem = word[:-len(s)]; break
-        if stem and len(stem)>1:
+        if stem and len(stem) > 1:
             tokens.append(stem)
     return tokens
+
+
+def clean_corpus(corpus_text: str) -> str:
+    """
+    코퍼스 정제
+    - URL, 숫자만 있는 줄, 특수문자 덩어리 제거
+    - 의미 있는 한국어/영어 문장만 남김
+    """
+    import re
+    lines = corpus_text.split('\n')
+    clean = []
+    seen  = set()
+    for line in lines:
+        s = line.strip()
+        if not s or len(s) < 6:
+            continue
+        if re.search(r'https?://', s):
+            continue
+        korean_en = len(re.findall(r'[가-힣a-zA-Z]', s))
+        if len(s) > 0 and korean_en / len(s.replace(' ','')) < 0.3:
+            continue
+        if re.match(r'^[\d\s]{10,}', s):
+            continue
+        if re.match(r'^[Ⅰ-Ⅹ①-⑳\s]+$', s):
+            continue
+        key = re.sub(r'\s+', '', s)[:40]
+        if key in seen:
+            continue
+        seen.add(key)
+        clean.append(s)
+    return '\n'.join(clean)
 
 
 # ── XAI 결과 ─────────────────────────────────────────────────
@@ -265,7 +296,9 @@ class GasCoreFramework:
                    som_grid: int = 6,
                    on_progress=None):
         """전체 프레임워크 초기화"""
-        self.corpus_text = corpus_text
+        # 코퍼스 자동 정제
+        corpus_text = clean_corpus(corpus_text)
+        self.corpus_text    = corpus_text
         self.guideline_hint = corpus_text[:1000]
 
         # Layer 1: 진화 인덱스
@@ -393,6 +426,8 @@ class GasCoreFramework:
                 "tri":   {k:dict(v) for k,v in self.nm.tri.items()},
                 "total": self.nm.total,
                 "alpha": getattr(self.nm,"alpha",0.001),
+                "mu":    getattr(self.nm,"mu",0.0),
+                "std":   getattr(self.nm,"std",1.0),
             }
         return data
 
@@ -419,6 +454,8 @@ class GasCoreFramework:
                             {k:Counter(v) for k,v in nm["tri"].items()})
             fw.nm.total = nm["total"]
             fw.nm.alpha = nm.get("alpha",0.001)
+            fw.nm.mu    = nm.get("mu",  0.0)
+            fw.nm.std   = nm.get("std", 1.0)
             fw.nm.is_trained = True
 
         # XAI + CoreAI 레이어 구성 (SOM 재학습 없음)
