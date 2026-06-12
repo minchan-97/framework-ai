@@ -72,12 +72,17 @@ _PUNCT_RE = re.compile(r"[^\w가-힣]")
 def normalize_token(token: str) -> str:
     """
     토큰 하나를 정규화.
-    구두점 제거 → 조사 → 어미 순으로 분리해서 어근 반환.
+    구두점 제거 → 숫자 정규화 → 조사 → 어미 순으로 분리해서 어근 반환.
     """
+    import re
     # 구두점 제거
     token = _PUNCT_RE.sub("", token)
     if not token:
         return ""
+    # 숫자+한글단위 정규화 (98일→NUM일, 51시간→NUM시간, 3학년→NUM학년)
+    token = re.sub(r'^\d+([가-힣]+)$', r'NUM\1', token)
+    # 순수 숫자 정규화 (98→NUM)
+    token = re.sub(r'^\d+$', 'NUM', token)
     if not _HANGUL_RE.search(token):
         return token.lower()
     stem = _strip_suffix(token, _JOSA_SORTED)
